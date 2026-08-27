@@ -1,8 +1,8 @@
 /* Shell cache — the data itself always comes live from Firebase. */
-const CACHE = 'mesimot-v7';
+const CACHE = 'mesimot-v9';
 const SHELL = ['./', './index.html', './manifest.webmanifest',
                './icon/icon-192.png', './icon/icon-512.png',
-               './icon/icon-maskable-512.png'];
+               './icon/icon-maskable-512.png', './new.html'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
