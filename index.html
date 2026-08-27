@@ -332,13 +332,17 @@ const FIREBASE = {
   messagingSenderId: "258471745644",
   appId:             "1:258471745644:web:2fd37e48695e1042c7a049"
 };
+// מזהה לקוח OAuth (Google Cloud → APIs & Services → Credentials → Web client)
+// זה מה שמאפשר התחברות בתוך הדף עצמו, בלי לצאת לגוגל ובלי חלון נפרד
+const GOOGLE_CLIENT_ID = "258471745644-8uigf8k473s6t2ofuadr5k4bkjrge8nj.apps.googleusercontent.com";
+
 // מפתח VAPID להתראות (Firebase → Project settings → Cloud Messaging → Web Push certificates)
 const VAPID_KEY = "BO-5zrR5XDD6GKFkM7nWzDI4I7QpsECGBJjkona0NjEkIXNolrSBA7eC3L3IJxE1bj5fGXFdMXjFmW4JlAErbis";
 const PUSH_READY = !VAPID_KEY.startsWith("PASTE");
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect,
-         getRedirectResult, onAuthStateChanged, signOut }
+         signInWithCredential, getRedirectResult, onAuthStateChanged, signOut }
   from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import { getDatabase, ref, onValue, update, set, remove, push, get }
   from "https://www.gstatic.com/firebasejs/10.12.5/firebase-database.js";
@@ -527,36 +531,120 @@ function showGate(msg){
 const isStandalone = () =>
   window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
 
+const GIS_READY = () => !GOOGLE_CLIENT_ID.startsWith('PASTE');
+
+function loadGis(){
+  if(window.google?.accounts?.id) return Promise.resolve(true);
+  return new Promise(resolve => {
+    const sc = document.createElement('script');
+    sc.src = 'https://accounts.google.com/gsi/client';
+    sc.async = true; sc.defer = true;
+    sc.onload  = () => resolve(!!window.google?.accounts?.id);
+    sc.onerror = () => resolve(false);
+    document.head.append(sc);
+    setTimeout(() => resolve(!!window.google?.accounts?.id), 6000);
+  });
+}
+
+/* Signs in without ever leaving the page: Google hands us an ID token
+   directly, and we exchange it with Firebase. No redirect, no popup —
+   which is exactly what an installed iOS app cannot survive. */
+async function mountGoogleButton(host, onError){
+  if(!GIS_READY()) return false;
+  if(!(await loadGis())) return false;
+  try{
+    google.accounts.id.initialize({
+      client_id: GOOGLE_CLIENT_ID,
+      callback: async res => {
+        try{
+          const cred = GoogleAuthProvider.credential(res.credential);
+          await signInWithCredential(auth, cred);
+        }catch(e){ console.error('[auth]', e); onError(e.code || e.message); }
+      },
+      auto_select: false,
+      use_fedcm_for_prompt: true,
+      context: 'signin'
+    });
+    const slot = el('div');
+    slot.style.cssText = 'display:flex;justify-content:center;min-height:44px';
+    host.append(slot);
+    google.accounts.id.renderButton(slot, {
+      type:'standard', theme:'outline', size:'large',
+      text:'signin_with', shape:'pill', locale:'he', width:300
+    });
+    return true;
+  }catch(e){ console.error('[auth]', e); return false; }
+}
+
 function renderSignIn(){
   const b = showGate('כדי שהרשימה תהיה שלכם בכל מכשיר, מתחברים פעם אחת.');
   const w = gateWrap();
-  const go = el('button','btn wide','התחברות עם גוגל');
+  const gisHost = el('div');
+  gisHost.style.cssText = 'display:flex;justify-content:center;width:100%';
   const err = el('div'); err.style.cssText='font-size:13px;color:var(--alert);min-height:18px;text-align:center';
+  const go = el('button','btn wide','התחברות עם גוגל');
   go.onclick = async ()=>{
     go.disabled = true; err.textContent='';
     const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
     try{
-      if(isStandalone()) await signInWithRedirect(auth, provider);
-      else await signInWithPopup(auth, provider);
+      await signInWithPopup(auth, provider);
     }catch(e){
-      console.error(e);
-      if(['auth/popup-blocked','auth/popup-closed-by-user','auth/cancelled-popup-request',
-          'auth/operation-not-supported-in-this-environment'].includes(e.code)){
-        try{ await signInWithRedirect(auth, provider); return; }catch(e2){ console.error(e2); }
+      console.error('[auth]', e);
+      if(e.code === 'auth/popup-closed-by-user' || e.code === 'auth/cancelled-popup-request'){
+        go.disabled = false; return;
       }
-      err.textContent = e.code === 'auth/unauthorized-domain'
-        ? 'הדומיין לא מאושר ב-Firebase (Authentication → Settings → Authorized domains).'
-        : 'ההתחברות נכשלה: ' + (e.code || e.message);
-      go.disabled = false;
+      if(e.code === 'auth/unauthorized-domain'){
+        err.textContent = 'הדומיין לא מאושר ב-Firebase (Authentication → Settings → Authorized domains).';
+        go.disabled = false; return;
+      }
+      // popup unavailable — fall back to a full redirect, but only once
+      if(sessionStorage.getItem('mesimot:redirected')){
+        showStuck(); return;
+      }
+      sessionStorage.setItem('mesimot:redirected','1');
+      try{ await signInWithRedirect(auth, provider); }
+      catch(e2){
+        console.error('[auth]', e2);
+        err.textContent = 'ההתחברות נכשלה: ' + (e2.code || e2.message);
+        go.disabled = false;
+      }
     }
   };
   const note = el('div');
   note.style.cssText='font-size:12.5px;color:var(--ink-3);text-align:center;margin-top:4px';
   note.textContent = 'אנחנו שומרים רק את השם ואת כתובת המייל, כדי לדעת מי סימן מה.';
-  w.append(go, err, note); b.append(w);
+
+  w.append(gisHost, err, note); b.append(w);
+
+  mountGoogleButton(gisHost, msg => { err.textContent = 'ההתחברות נכשלה: ' + msg; })
+    .then(ok => {
+      if(ok){
+        // in-page sign-in is available; keep the old route as a quiet second option
+        const alt = el('button','mini','לא עובד? נסו דרך אחרת');
+        alt.style.marginTop = '2px';
+        alt.onclick = () => { alt.remove(); gisHost.after(go); };
+        gisHost.after(alt);
+      } else {
+        gisHost.replaceWith(go);
+      }
+    });
 }
 
 /* ---------- no household yet ---------- */
+function showStuck(){
+  const b = showGate('ההתחברות לא הושלמה בתוך האפליקציה המותקנת.');
+  const w = gateWrap();
+  const t = el('div');
+  t.style.cssText='font-size:14px;color:var(--ink-2);text-align:center;line-height:1.6';
+  t.innerHTML = 'זו מגבלה ידועה של אייפון: אפליקציה שהותקנה למסך הבית מקבלת אחסון נפרד,' +
+                ' ולפעמים ההתחברות לא חוזרת אליה.<br><br>' +
+                'פתחו את הקישור <b>בספארי</b>, התחברו שם, ואז הוסיפו שוב למסך הבית.';
+  const again = el('button','btn wide','ניסיון נוסף');
+  again.onclick = ()=>{ sessionStorage.removeItem('mesimot:redirected'); location.reload(); };
+  w.append(t, again); b.append(w);
+}
+
 function renderPickHousehold(list){
   const b = showGate('לאיזה בית להיכנס?');
   const w = el('div','who');
@@ -680,7 +768,13 @@ function errText(e){
 
   let started = false;
   onAuthStateChanged(auth, async u => {
-    if(!u){ S.uid = null; S.user = null; renderSignIn(); return; }
+    if(!u){
+      S.uid = null; S.user = null;
+      if(sessionStorage.getItem('mesimot:redirected')) showStuck();
+      else renderSignIn();
+      return;
+    }
+    sessionStorage.removeItem('mesimot:redirected');
     if(started) return;
     started = true;
     S.uid = u.uid; S.user = { displayName:u.displayName, email:u.email, photoURL:u.photoURL };
@@ -1391,18 +1485,30 @@ function downloadIcs(tasks){
 /* ---------- notifications ---------- */
 async function enableNotifications(){
   try{
+    if(!PUSH_READY){ toast('חסר מפתח VAPID בקובץ'); return; }
+    if(!('Notification' in window)){ toast('הדפדפן הזה לא תומך בהתראות'); return; }
+
     const perm = await Notification.requestPermission();
-    if(perm!=='granted'){ localStorage.setItem('mesimot:notif','no'); render(); return; }
+    if(perm !== 'granted'){ localStorage.setItem('mesimot:notif','no'); render(); return; }
     localStorage.setItem('mesimot:notif','on');
-    const reg = await navigator.serviceWorker.register('firebase-messaging-sw.js', {scope:'./'});
-    const { getMessaging, getToken } = await import('https://www.gstatic.com/firebasejs/10.12.5/firebase-messaging.js');
-    const msg = getMessaging();
-    const token = await getToken(msg, {vapidKey: VAPID_KEY, serviceWorkerRegistration: reg});
-    if(token) await set(ref(db, P('members', S.me, 'tokens', token.slice(-24))), {token, at:Date.now()});
+
+    // one worker handles both caching and push — reuse it, don't register a second
+    const reg = await navigator.serviceWorker.ready;
+    const { getMessaging, getToken, isSupported } =
+      await import('https://www.gstatic.com/firebasejs/10.12.5/firebase-messaging.js');
+    if(!(await isSupported())){ toast('התראות לא נתמכות בדפדפן הזה'); render(); return; }
+
+    const token = await getToken(getMessaging(), { vapidKey: VAPID_KEY, serviceWorkerRegistration: reg });
+    if(!token) throw new Error('לא התקבל מזהה מכשיר');
+
+    await set(ref(db, P('members', S.me, 'tokens', token.slice(-24))), { token, at: Date.now() });
     toast('התראות הופעלו');
   }catch(e){
-    console.error(e);
-    toast('לא הצלחנו להפעיל התראות');
+    console.error('[push]', e);
+    const code = e.code || e.message || String(e);
+    toast(/token-subscribe|403|PERMISSION/i.test(code)
+      ? 'צריך להפעיל את Cloud Messaging API בפרויקט'
+      : 'התראות נכשלו: ' + code);
   }
   render();
 }
@@ -1419,7 +1525,8 @@ document.querySelectorAll('#tabs button').forEach(b=>{
   };
 });
 window.addEventListener('hashchange', ()=>location.reload());
-if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
+if('serviceWorker' in navigator)
+  navigator.serviceWorker.register('sw.js', {scope:'./'}).catch(e=>console.warn('sw:', e));
 </script>
 </body>
 </html>
