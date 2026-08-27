@@ -335,7 +335,8 @@ const VAPID_KEY = "BO-5zrR5XDD6GKFkM7nWzDI4I7QpsECGBJjkona0NjEkIXNolrSBA7eC3L3IJ
 const PUSH_READY = !VAPID_KEY.startsWith("PASTE");
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
-import { getAuth, signInAnonymously, onAuthStateChanged }
+import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect,
+         getRedirectResult, onAuthStateChanged, signOut }
   from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import { getDatabase, ref, onValue, update, set, remove, push, get }
   from "https://www.gstatic.com/firebasejs/10.12.5/firebase-database.js";
@@ -383,162 +384,164 @@ const DEFAULT_LISTS = {
   shop:   {name:'קניות',  emoji:'🛒', kind:'shopping', order:2},
   errand: {name:'סידורים',emoji:'📋', kind:'tasks', order:3}
 };
-const S = { hid:null, me:null, members:null, lists:{}, tasks:{}, activity:{}, meta:{},
+const S = { hid:null, me:null, uid:null, user:null, members:null, lists:{}, tasks:{}, activity:{}, meta:{},
             tab:'tasks', filter:'all', list:'all', shopList:'shop', ready:false };
 
 let db, auth, uid=null;
 
 /* ---------- household id ---------- */
-function readHid(){
+function hidFromHash(){
   const m = location.hash.match(/h=([A-Za-z0-9_-]{6,})/);
-  if(m) return m[1];
-  const saved = localStorage.getItem('mesimot:lasthid');
-  if(saved){ location.hash = 'h='+saved; return saved; }
-  return null;   // unknown — ask, never invent (see renderRecovery)
+  return m ? m[1] : null;
 }
 function newHid(){
   return 'b' + Math.random().toString(36).slice(2,8) + Math.random().toString(36).slice(2,6);
 }
-function renderRecovery(){
+const firstName = () => (S.user?.displayName || '').trim().split(/\s+/)[0] || '';
+const gateWrap = () => {
+  const w = el('div');
+  w.style.cssText='width:100%;max-width:340px;display:flex;flex-direction:column;align-items:center;gap:12px';
+  return w;
+};
+function showGate(msg){
   $('#gate').classList.remove('hide');
-  $('#gateMsg').textContent = 'הדביקו כאן את הקישור לרשימה שלכם.';
-  const b = $('#gateBody'); b.innerHTML='';
-  const wrap = el('div');
-  wrap.style.cssText='width:100%;max-width:340px;display:flex;flex-direction:column;align-items:center;gap:12px';
+  ['#hdr','#strip','#app','#fab','#tabs'].forEach(x=>$(x).classList.add('hide'));
+  $('#gateMsg').textContent = msg;
+  const b = $('#gateBody'); b.innerHTML=''; return b;
+}
+
+/* ---------- sign in ---------- */
+const isStandalone = () =>
+  window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+
+function renderSignIn(){
+  const b = showGate('כדי שהרשימה תהיה שלכם בכל מכשיר, מתחברים פעם אחת.');
+  const w = gateWrap();
+  const go = el('button','btn wide','התחברות עם גוגל');
+  const err = el('div'); err.style.cssText='font-size:13px;color:var(--alert);min-height:18px;text-align:center';
+  go.onclick = async ()=>{
+    go.disabled = true; err.textContent='';
+    const provider = new GoogleAuthProvider();
+    try{
+      if(isStandalone()) await signInWithRedirect(auth, provider);
+      else await signInWithPopup(auth, provider);
+    }catch(e){
+      console.error(e);
+      if(['auth/popup-blocked','auth/popup-closed-by-user','auth/cancelled-popup-request',
+          'auth/operation-not-supported-in-this-environment'].includes(e.code)){
+        try{ await signInWithRedirect(auth, provider); return; }catch(e2){ console.error(e2); }
+      }
+      err.textContent = e.code === 'auth/unauthorized-domain'
+        ? 'הדומיין לא מאושר ב-Firebase (Authentication → Settings → Authorized domains).'
+        : 'ההתחברות נכשלה: ' + (e.code || e.message);
+      go.disabled = false;
+    }
+  };
+  const note = el('div');
+  note.style.cssText='font-size:12.5px;color:var(--ink-3);text-align:center;margin-top:4px';
+  note.textContent = 'אנחנו שומרים רק את השם ואת כתובת המייל, כדי לדעת מי סימן מה.';
+  w.append(go, err, note); b.append(w);
+}
+
+/* ---------- no household yet ---------- */
+function renderPickHousehold(list){
+  const b = showGate('לאיזה בית להיכנס?');
+  const w = el('div','who');
+  Object.entries(list).forEach(([hid, v])=>{
+    const btn = el('button');
+    btn.innerHTML = `<span class="dot" style="background:var(--a)"></span>${esc(v.name || 'הבית שלנו')}`;
+    btn.onclick = ()=>{ location.hash = 'h='+hid; location.reload(); };
+    w.append(btn);
+  });
+  b.append(w);
+}
+function renderNoHousehold(){
+  const b = showGate('אפשר לפתוח בית חדש, או להיכנס לקישור שקיבלתם.');
+  const w = gateWrap();
+  const mk = el('button','btn wide','פתיחת בית חדש');
+  mk.onclick = async ()=>{
+    mk.disabled = true;
+    try{
+      const hid = await createHousehold();
+      location.hash = 'h='+hid; location.reload();
+    }catch(e){ console.error(e); err.textContent = 'לא הצלחנו ליצור בית: ' + (e.code||e.message); mk.disabled=false; }
+  };
   const i = el('input'); i.type='text'; i.placeholder='https://…/mesimot/#h=…';
   i.setAttribute('style','direction:ltr;text-align:left');
-  const go = el('button','btn wide','כניסה');
-  const err = el('div'); err.style.cssText='font-size:13px;color:var(--alert);min-height:18px';
-  go.onclick = ()=>{
+  const join = el('button','mini','כניסה עם קישור');
+  const err = el('div'); err.style.cssText='font-size:13px;color:var(--alert);min-height:18px;text-align:center';
+  join.onclick = ()=>{
     const m = i.value.trim().match(/h=([A-Za-z0-9_-]{6,})/);
-    if(!m){ err.textContent='לא מצאתי מזהה בקישור. ודאו שהעתקתם אותו במלואו.'; return; }
-    location.hash = 'h=' + m[1];
-    location.reload();
+    if(!m){ err.textContent='לא מצאתי מזהה בקישור.'; return; }
+    location.hash = 'h='+m[1]; location.reload();
   };
-  i.onkeydown = e => { if(e.key==='Enter') go.click(); };
-  const alt = el('button','mini','אין לי קישור — לפתוח בית חדש');
-  alt.onclick = ()=>{ location.hash = 'h=' + newHid(); location.reload(); };
-  wrap.append(i, go, err, alt); b.append(wrap);
+  i.onkeydown = e => { if(e.key==='Enter') join.click(); };
+  w.append(mk, i, join, err); b.append(w);
 }
-const P = (...p) => ['households', S.hid, ...p].join('/');
 
-/* ==========================================================
-   parsing — "לקנות חלב מחר ב-18:00 כל שבוע !!"
-   ========================================================== */
-function parseQuick(raw){
-  let t = ' ' + raw.trim() + ' ';
-  const out = { title:'', due:null, time:null, repeat:null, priority:0, listId:null, assignee:null };
-  const eat = re => { const m = t.match(re); if(m){ t = t.replace(m[0], ' '); return m; } return null; };
-
-  let m;
-  if((m = eat(/\s(!{1,3})(?=\s)/)))              out.priority = m[1].length;
-  if((m = eat(/\s#(\S+)/))){
-    const q = m[1];
-    for(const [id,l] of Object.entries(S.lists)) if(l.name===q) out.listId=id;
-  }
-  if((m = eat(/\sכל\s+(?:יום\s+)?(ראשון|שני|שלישי|רביעי|חמישי|שישי|שבת)(?=\s)/))){
-    out.repeat = {u:'w', n:1};
-    out.due = iso(nextWeekday(WD.indexOf(m[1])));
-  } else if((m = eat(/\sכל\s+(יום|יומיים|שבוע|שבועיים|חודש|חודשיים)(?=\s)/))){
-    const REP = {'יום':{u:'d',n:1},'יומיים':{u:'d',n:2},'שבוע':{u:'w',n:1},
-                 'שבועיים':{u:'w',n:2},'חודש':{u:'m',n:1},'חודשיים':{u:'m',n:2}};
-    out.repeat = REP[m[1]] || {u:'d',n:1};
-  }
-  if((m = eat(/\s(?:ב|בשעה\s*)?-?(\d{1,2}):(\d{2})(?=\s)/))){
-    out.time = String(m[1]).padStart(2,'0') + ':' + m[2];
-  }
-  if(!out.due){
-    if(eat(/\sהיום(?=\s)/))            out.due = today();
-    else if(eat(/\sמחרתיים(?=\s)/))    out.due = iso(Date.now()+2*DAY);
-    else if(eat(/\sמחר(?=\s)/))        out.due = iso(Date.now()+DAY);
-    else if((m = eat(/\sבעוד\s+(?:(\d+)\s*)?(ימים|יומיים|יום|שבועות|שבועיים|שבוע|חודשיים|חודש)(?=\s)/))){
-      const dual = {'יומיים':2,'שבועיים':2,'חודשיים':2};
-      const n = Number(m[1]) || dual[m[2]] || 1;
-      const unit = m[2].startsWith('שב') ? 7*DAY : m[2].startsWith('חוד') ? 30*DAY : DAY;
-      out.due = iso(Date.now() + n*unit);
-    }
-    else if((m = eat(/\sב(?:יום\s+)?(ראשון|שני|שלישי|רביעי|חמישי|שישי|שבת)(?=\s)/)))
-      out.due = iso(nextWeekday(WD.indexOf(m[1])));
-  }
-  out.title = t.replace(/\s+/g,' ').trim();
-  return out;
-}
-function nextWeekday(target){
-  const d = new Date(); d.setHours(12,0,0,0);
-  let add = (target - d.getDay() + 7) % 7; if(add===0) add=7;
-  return d.getTime() + add*DAY;
-}
-function advance(ds, rep){
-  const [y,m,d] = ds.split('-').map(Number);
-  const x = new Date(y, m-1, d, 12);
-  const now = new Date(); now.setHours(12,0,0,0);
-  do{
-    if(rep.u==='d') x.setDate(x.getDate()+rep.n);
-    else if(rep.u==='w') x.setDate(x.getDate()+7*rep.n);
-    else x.setMonth(x.getMonth()+rep.n);
-  } while(x <= now);
-  return iso(x);
-}
-const repLabel = r => !r ? '' :
-  r.u==='d' ? (r.n===1?'כל יום'  : r.n===2?'כל יומיים'  : `כל ${r.n} ימים`) :
-  r.u==='w' ? (r.n===1?'כל שבוע' : r.n===2?'כל שבועיים' : `כל ${r.n} שבועות`) :
-              (r.n===1?'כל חודש' : r.n===2?'כל חודשיים' : `כל ${r.n} חודשים`);
-
-/* ==========================================================
-   data ops
-   ========================================================== */
-function log(type, title){
-  push(ref(db, P('activity')), {type, title, by:S.me, at:Date.now()});
-}
-async function addTask(p){
-  const listId = p.listId || (S.list!=='all' ? S.list : firstList('tasks'));
-  const id = push(ref(db, P('tasks'))).key;
-  await set(ref(db, P('tasks', id)), {
-    title:p.title, notes:p.notes||'', listId,
-    assignee:p.assignee||'both', due:p.due||null, time:p.time||null,
-    repeat:p.repeat||null, priority:p.priority||0,
-    done:false, doneBy:null, doneAt:null,
-    subtasks:p.subtasks||null,
-    createdBy:S.me, createdAt:Date.now(), order:Date.now()
+/* ---------- membership ---------- */
+async function createHousehold(){
+  const hid = newHid();
+  await set(ref(db, 'households/'+hid), {
+    meta:{ name:'הבית שלנו', createdAt:Date.now(), owner:S.uid },
+    members:{ a:{name:firstName()||'אני', emoji:'🌸', uid:S.uid},
+              b:{name:'', emoji:'⚡'} },
+    lists: DEFAULT_LISTS
   });
-  log('add', p.title);
-  return id;
+  await noteHousehold(hid, 'הבית שלנו');
+  return hid;
 }
-async function toggleTask(id){
-  const t = S.tasks[id]; if(!t) return;
-  if(!t.done && t.repeat && t.due){
-    const next = advance(t.due, t.repeat);
-    const subs = t.subtasks ? Object.fromEntries(Object.entries(t.subtasks).map(([k,v])=>[k,{...v,done:false}])) : null;
-    await update(ref(db, P('tasks', id)), {due:next, subtasks:subs, doneBy:S.me, doneAt:Date.now()});
-    log('done', t.title);
-    toast(`בוצע · חוזר ב${humanDate(next)}`);
-  } else {
-    const done = !t.done;
-    await update(ref(db, P('tasks', id)), {done, doneBy:done?S.me:null, doneAt:done?Date.now():null});
-    if(done){ log('done', t.title); toast('בוצע', ()=>update(ref(db,P('tasks',id)),{done:false,doneBy:null,doneAt:null})); }
+async function noteHousehold(hid, name){
+  await update(ref(db, 'users/'+S.uid), {
+    lastHid: hid,
+    ['households/'+hid]: { name: name || 'הבית שלנו', at: Date.now() }
+  });
+}
+/* returns 'a' | 'b' | 'full' */
+async function ensureMembership(hid){
+  const slotUid = async k => (await get(ref(db, `households/${hid}/members/${k}/uid`))).val() || null;
+  const ua = await slotUid('a'), ub = await slotUid('b');
+
+  if(ua === S.uid) return 'a';
+  if(ub === S.uid) return 'b';
+
+  let slot = !ua ? 'a' : !ub ? 'b' : null;
+  if(!slot) return 'full';
+
+  // a household from before accounts existed: nobody is linked yet — let them say who they are
+  if(!ua && !ub){
+    const mem = (await get(ref(db, `households/${hid}/members`))).val() || {};
+    if(mem.a?.name && mem.b?.name){
+      slot = await new Promise(resolve => {
+        const b = showGate('מי אתם?');
+        const w = el('div','who');
+        for(const k of ['a','b']){
+          const btn = el('button');
+          btn.innerHTML = `<span class="dot" style="background:${colorOf(k)}"></span>${esc(mem[k].name)} ${mem[k].emoji||''}`;
+          btn.onclick = ()=>resolve(k);
+          w.append(btn);
+        }
+        b.append(w);
+      });
+    }
   }
-}
-async function delTask(id){
-  const t = S.tasks[id]; if(!t) return;
-  await remove(ref(db, P('tasks', id)));
-  log('del', t.title);
-  toast('נמחק', ()=>set(ref(db, P('tasks', id)), t));
-}
-const firstList = kind => Object.entries(S.lists).find(([,l])=>l.kind===kind)?.[0] || 'home';
-const other = m => m==='a' ? 'b' : 'a';
-const nameOf = m => m==='both' ? 'שנינו' : (S.members?.[m]?.name || (m==='a'?'היא':'הוא'));
-const colorOf = m => m==='a' ? 'var(--a)' : m==='b' ? 'var(--b)' : 'var(--pink)';
-const inkOf   = m => m==='a' ? 'var(--a-ink)' : m==='b' ? 'var(--b-ink)' : 'var(--pink-ink)';
-const tintOf  = m => m==='a' ? 'var(--a-tint)' : m==='b' ? 'var(--b-tint)' : 'var(--pink-tint)';
 
-/* ==========================================================
-   boot
-   ========================================================== */
+  await set(ref(db, `households/${hid}/members/${slot}/uid`), S.uid);
+  const cur = (await get(ref(db, `households/${hid}/members/${slot}`))).val() || {};
+  await update(ref(db, `households/${hid}/members/${slot}`), {
+    name:  cur.name  || firstName() || (slot==='a' ? 'אני' : 'בן/בת הזוג'),
+    emoji: cur.emoji || (slot==='a' ? '🌸' : '⚡')
+  });
+  return slot;
+}
+
+function errText(e){
+  return String(e.message || e).includes('permission')
+    ? 'אין הרשאת גישה למסד. ודאו שחוקי הגישה החדשים פורסמו בלשונית Rules.'
+    : 'שגיאה: ' + (e.code || e.message || e);
+}
+
 (async function boot(){
-  S.hid = readHid();
-  if(!S.hid){ renderRecovery(); return; }
-  localStorage.setItem('mesimot:lasthid', S.hid);
-
   if(FIREBASE.apiKey.startsWith('PASTE')){
     $('#gateMsg').textContent = 'צריך להדביק את פרטי ה-Firebase בתחילת הקובץ index.html.';
     return;
@@ -546,93 +549,71 @@ const tintOf  = m => m==='a' ? 'var(--a-tint)' : m==='b' ? 'var(--b-tint)' : 'va
   const app = initializeApp(FIREBASE);
   auth = getAuth(app); db = getDatabase(app);
 
-  try { await signInAnonymously(auth); }
-  catch(e){ $('#gateMsg').textContent = 'ההתחברות נכשלה. ודא ש-Anonymous Auth מופעל ב-Firebase. (' + e.code + ')'; return; }
+  try{ await getRedirectResult(auth); }catch(e){ console.error(e); }
 
-  onAuthStateChanged(auth, u => { if(u) uid = u.uid; });
-
-  // cache first paint
-  try{
-    const c = JSON.parse(localStorage.getItem('mesimot:cache:'+S.hid) || 'null');
-    if(c){ Object.assign(S, {members:c.members, lists:c.lists, tasks:c.tasks, activity:c.activity, meta:c.meta}); }
-  }catch{}
-
-  const fail = msg => { $('#gate').classList.remove('hide'); $('#gateMsg').textContent = msg; };
-  const slow = setTimeout(() => fail('המסד לא מגיב. בדוק שחוקי הגישה פורסמו בלשונית Rules, ושכתובת databaseURL נכונה.'), 12000);
-
-  try{
-    const snap = await get(ref(db, P()));
-    if(!snap.exists()){
-      await set(ref(db, P()), {
-        meta:{name:'הבית שלנו', createdAt:Date.now()},
-        members:{a:{name:'', emoji:'🌸'}, b:{name:'', emoji:'⚡'}},
-        lists: DEFAULT_LISTS
-      });
-    }
-  }catch(e){
-    clearTimeout(slow);
-    console.error(e);
-    fail(String(e.message||e).includes('permission')
-      ? 'אין הרשאת גישה למסד. הדבק את database.rules.json בלשונית Rules ולחץ Publish.'
-      : 'שגיאה בחיבור למסד: ' + (e.message || e));
-    return;
-  }
-  clearTimeout(slow);
-
-  onValue(ref(db, P()), s => {
-    const v = s.val() || {};
-    S.meta = v.meta||{}; S.members = v.members||{}; S.lists = v.lists||DEFAULT_LISTS;
-    S.tasks = v.tasks||{}; S.activity = v.activity||{};
-    localStorage.setItem('mesimot:cache:'+S.hid, JSON.stringify({meta:S.meta,members:S.members,lists:S.lists,tasks:S.tasks,activity:S.activity}));
-    S.ready = true;
-    gateOrRender();
-  }, err => {
-    console.error(err);
-    fail('הקריאה מהמסד נכשלה: ' + (err.message || err));
+  let started = false;
+  onAuthStateChanged(auth, async u => {
+    if(!u){ S.uid = null; S.user = null; renderSignIn(); return; }
+    if(started) return;
+    started = true;
+    S.uid = u.uid; S.user = { displayName:u.displayName, email:u.email, photoURL:u.photoURL };
+    try{ await afterSignIn(); }
+    catch(e){ console.error(e); showGate(errText(e)); }
   });
 })();
 
-function gateOrRender(){
-  const saved = localStorage.getItem('mesimot:me:'+S.hid);
-  if(!S.members?.a?.name || !S.members?.b?.name){ renderSetup(); return; }
-  if(saved!=='a' && saved!=='b'){ renderWho(); return; }
-  S.me = saved;
-  $('#gate').classList.add('hide');
-  ['#hdr','#strip','#app','#fab','#tabs'].forEach(s=>$(s).classList.remove('hide'));
-  render();
+
+async function afterSignIn(){
+  showGate('רגע, טוענים…');
+
+  // which household?
+  let hid = hidFromHash();
+  if(!hid){
+    const me = (await get(ref(db, 'users/'+S.uid))).val() || {};
+    const list = me.households || {};
+    if(me.lastHid && list[me.lastHid]) hid = me.lastHid;
+    else if(Object.keys(list).length === 1) hid = Object.keys(list)[0];
+    else if(Object.keys(list).length > 1){ renderPickHousehold(list); return; }
+  }
+  if(!hid){ renderNoHousehold(); return; }
+
+  const slot = await ensureMembership(hid);
+  if(slot === 'full'){
+    const b = showGate('הבית הזה כבר מלא — שני המקומות תפוסים.');
+    const back = el('button','mini','פתיחת בית משלי');
+    back.onclick = ()=>{ location.hash=''; location.reload(); };
+    b.append(back); return;
+  }
+  S.hid = hid; S.me = slot;
+  if(!location.hash.includes(hid)) history.replaceState(null,'','#h='+hid);
+  localStorage.setItem('mesimot:lasthid', hid);
+
+  // cached first paint
+  try{
+    const c = JSON.parse(localStorage.getItem('mesimot:cache:'+hid) || 'null');
+    if(c) Object.assign(S, {members:c.members, lists:c.lists, tasks:c.tasks, activity:c.activity, meta:c.meta});
+  }catch{}
+
+  const slow = setTimeout(()=>showGate('המסד לא מגיב. בדקו את חוקי הגישה ואת databaseURL.'), 12000);
+  let first = true;
+  onValue(ref(db, P()), snap => {
+    clearTimeout(slow);
+    const v = snap.val() || {};
+    S.meta = v.meta||{}; S.members = v.members||{}; S.lists = v.lists||DEFAULT_LISTS;
+    S.tasks = v.tasks||{}; S.activity = v.activity||{};
+    localStorage.setItem('mesimot:cache:'+S.hid,
+      JSON.stringify({meta:S.meta,members:S.members,lists:S.lists,tasks:S.tasks,activity:S.activity}));
+    S.ready = true;
+    if(first){ first = false; noteHousehold(S.hid, S.meta.name).catch(()=>{}); }
+    enterApp();
+  }, err => { clearTimeout(slow); console.error(err); showGate(errText(err)); });
 }
 
-/* ---------- gate screens ---------- */
-function renderSetup(){
-  $('#gate').classList.remove('hide');
-  $('#gateMsg').textContent = 'רק שני שמות ונתחיל.';
-  const b = $('#gateBody'); b.innerHTML='';
-  const f1 = el('div','field','<label>השם הראשון</label>'); const i1=el('input'); i1.type='text'; i1.placeholder='למשל: נועה'; f1.append(i1);
-  const f2 = el('div','field','<label>השם השני</label>');   const i2=el('input'); i2.type='text'; i2.placeholder='למשל: יונתן'; f2.append(i2);
-  const go = el('button','btn wide','ממשיכים');
-  go.style.marginTop='22px';
-  go.onclick = async ()=>{
-    if(!i1.value.trim() || !i2.value.trim()) return;
-    await update(ref(db, P('members')), {
-      a:{name:i1.value.trim(), emoji:'🌸'},
-      b:{name:i2.value.trim(), emoji:'⚡'}
-    });
-  };
-  const wrap = el('div'); wrap.style.cssText='width:100%;max-width:320px;display:flex;flex-direction:column;align-items:center';
-  wrap.append(f1,f2,go); b.append(wrap);
-}
-function renderWho(){
-  $('#gate').classList.remove('hide');
-  $('#gateMsg').textContent = 'מי אתם? נזכור את זה במכשיר הזה.';
-  const b = $('#gateBody'); b.innerHTML='';
-  const w = el('div','who');
-  for(const k of ['a','b']){
-    const btn = el('button');
-    btn.innerHTML = `<span class="dot" style="background:${colorOf(k)}"></span>${esc(S.members[k].name)} ${S.members[k].emoji||''}`;
-    btn.onclick = ()=>{ localStorage.setItem('mesimot:me:'+S.hid, k); gateOrRender(); };
-    w.append(btn);
-  }
-  b.append(w);
+function enterApp(){
+  $('#gate').classList.add('hide');
+  ['#hdr','#strip','#app','#tabs'].forEach(x=>$(x).classList.remove('hide'));
+  $('#fab').classList.toggle('hide', S.tab!=='tasks');
+  render();
 }
 
 /* ==========================================================
@@ -974,13 +955,32 @@ function renderSettings(){
     const save = ()=>update(ref(db,P('members',k)),{name:nm.value.trim()||nameOf(k), emoji:em.value.trim()});
     em.onchange=save; nm.onchange=save;
     line.append(dot, em, nm);
-    if(k===S.me){ const tagm=el('span','tag','זה אני'); line.append(tagm); }
+    if(k===S.me) line.append(el('span','tag','זה אני'));
+    else if(S.members[k]?.uid){
+      const rm = el('button','mini','הסרה');
+      rm.onclick = async ()=>{
+        if(!confirm(`להסיר את ${nameOf(k)} מהבית? הוא/היא לא יראו יותר את הרשימה, והמשימות יישארו.`)) return;
+        await remove(ref(db, P('members', k, 'uid')));
+        toast('הוסר מהבית');
+      };
+      line.append(rm);
+    } else line.append(el('span','tag','טרם הצטרף/ה'));
     p1.append(line);
   }
-  const swap = el('button','mini','אני בעצם השני');
-  swap.style.marginTop='12px';
-  swap.onclick = ()=>{ localStorage.setItem('mesimot:me:'+S.hid, other(S.me)); S.me=other(S.me); render(); };
-  p1.append(swap); v.append(p1);
+  v.append(p1);
+
+  // account
+  const pa = el('div','panel'); pa.append(el('h3',null,'החשבון שלי'));
+  const acc = el('div','set-row',
+    `<div><div class="lab">${esc(S.user?.displayName || 'מחובר')}</div>` +
+    `<div class="hint">${esc(S.user?.email || '')}</div></div>`);
+  const out = el('button','mini','התנתקות');
+  out.onclick = async ()=>{
+    if(!confirm('להתנתק מהמכשיר הזה?')) return;
+    localStorage.removeItem('mesimot:lasthid');
+    await signOut(auth); location.hash=''; location.reload();
+  };
+  acc.append(out); pa.append(acc); v.append(pa);
 
   // lists
   const p2 = el('div','panel'); p2.append(el('h3',null,'רשימות'));
@@ -1018,7 +1018,10 @@ function renderSettings(){
   // sharing
   const p3 = el('div','panel'); p3.append(el('h3',null,'שיתוף'));
   const hint = el('div'); hint.style.cssText='font-size:13.5px;color:var(--ink-2);margin-bottom:10px';
-  hint.textContent = 'זה הקישור לרשימה שלכם. כל מי שיפתח אותו יראה את אותן משימות — שלחו רק אחד לשני.';
+  const free = !S.members?.a?.uid || !S.members?.b?.uid;
+  hint.textContent = free
+    ? 'קישור הזמנה. מי שיפתח אותו ויתחבר יצטרף לבית — יש מקום אחד פנוי.'
+    : 'שני המקומות בבית תפוסים. הקישור לא יצרף אף אחד חדש, והוא שימושי רק לכם כדי לחזור לרשימה.';
   const url = location.origin + location.pathname + '#h=' + S.hid;
   const box = el('div','linkbox', `<code>${esc(url)}</code>`);
   const cp = el('button','mini','העתקה');
@@ -1051,9 +1054,15 @@ function renderSettings(){
   p4.append(note); v.append(p4);
 
   const p5 = el('div','panel');
-  const rs = el('button','btn danger wide','ניתוק המכשיר הזה');
-  rs.onclick = ()=>{ if(confirm('לשכוח מי אתם במכשיר הזה? המשימות יישארו.')){ localStorage.removeItem('mesimot:me:'+S.hid); location.reload(); } };
-  p5.append(rs); v.append(p5);
+  const leave = el('button','btn danger wide','יציאה מהבית הזה');
+  leave.onclick = async ()=>{
+    if(!confirm('לצאת מהבית? לא תראו יותר את הרשימה. המשימות יישארו לבן/בת הזוג.')) return;
+    await remove(ref(db, P('members', S.me, 'uid')));
+    await remove(ref(db, 'users/'+S.uid+'/households/'+S.hid));
+    localStorage.removeItem('mesimot:lasthid');
+    location.hash=''; location.reload();
+  };
+  p5.append(leave); v.append(p5);
 }
 
 /* ==========================================================
