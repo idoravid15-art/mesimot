@@ -1,7 +1,7 @@
 /* One service worker for everything: shell cache + background push.
    Two workers registered on the same scope overwrite each other, so
    the messaging handler lives here rather than in its own file. */
-const CACHE = 'mesimot-v11';
+const CACHE = 'mesimot-v14';
 const SHELL = ['./', './index.html', './manifest.webmanifest',
                './icon/icon-192.png', './icon/icon-512.png',
                './icon/icon-maskable-512.png', './new.html'];
