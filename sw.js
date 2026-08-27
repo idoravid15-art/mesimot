@@ -1,5 +1,5 @@
 /* Shell cache — the data itself always comes live from Firebase. */
-const CACHE = 'mesimot-v4';
+const CACHE = 'mesimot-v7';
 const SHELL = ['./', './index.html', './manifest.webmanifest',
                './icon/icon-192.png', './icon/icon-512.png',
                './icon/icon-maskable-512.png'];
