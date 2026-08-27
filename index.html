@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <title>המטלות שלנו</title>
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icon/icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Assistant:wght@300;400;600;700;800&family=Varela+Round&display=swap" rel="stylesheet">
@@ -394,8 +394,31 @@ function readHid(){
   if(m) return m[1];
   const saved = localStorage.getItem('mesimot:lasthid');
   if(saved){ location.hash = 'h='+saved; return saved; }
-  const fresh = 'b' + Math.random().toString(36).slice(2,8) + Math.random().toString(36).slice(2,6);
-  location.hash = 'h='+fresh; return fresh;
+  return null;   // unknown — ask, never invent (see renderRecovery)
+}
+function newHid(){
+  return 'b' + Math.random().toString(36).slice(2,8) + Math.random().toString(36).slice(2,6);
+}
+function renderRecovery(){
+  $('#gate').classList.remove('hide');
+  $('#gateMsg').textContent = 'הדביקו כאן את הקישור לרשימה שלכם.';
+  const b = $('#gateBody'); b.innerHTML='';
+  const wrap = el('div');
+  wrap.style.cssText='width:100%;max-width:340px;display:flex;flex-direction:column;align-items:center;gap:12px';
+  const i = el('input'); i.type='text'; i.placeholder='https://…/mesimot/#h=…';
+  i.setAttribute('style','direction:ltr;text-align:left');
+  const go = el('button','btn wide','כניסה');
+  const err = el('div'); err.style.cssText='font-size:13px;color:var(--alert);min-height:18px';
+  go.onclick = ()=>{
+    const m = i.value.trim().match(/h=([A-Za-z0-9_-]{6,})/);
+    if(!m){ err.textContent='לא מצאתי מזהה בקישור. ודאו שהעתקתם אותו במלואו.'; return; }
+    location.hash = 'h=' + m[1];
+    location.reload();
+  };
+  i.onkeydown = e => { if(e.key==='Enter') go.click(); };
+  const alt = el('button','mini','אין לי קישור — לפתוח בית חדש');
+  alt.onclick = ()=>{ location.hash = 'h=' + newHid(); location.reload(); };
+  wrap.append(i, go, err, alt); b.append(wrap);
 }
 const P = (...p) => ['households', S.hid, ...p].join('/');
 
@@ -513,6 +536,7 @@ const tintOf  = m => m==='a' ? 'var(--a-tint)' : m==='b' ? 'var(--b-tint)' : 'va
    ========================================================== */
 (async function boot(){
   S.hid = readHid();
+  if(!S.hid){ renderRecovery(); return; }
   localStorage.setItem('mesimot:lasthid', S.hid);
 
   if(FIREBASE.apiKey.startsWith('PASTE')){
