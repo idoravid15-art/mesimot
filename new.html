@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#F4F1F9" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#221E2B" media="(prefers-color-scheme: dark)">
+<meta name="robots" content="noindex">
+<title>הנפקת קישורים · המטלות שלנו</title>
+<link rel="icon" href="icon/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Assistant:wght@300;400;600;700;800&family=Varela+Round&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#F4F1F9; --surface:#FCFAFE; --surface-2:#EDE8F4;
+  --ink:#4E4859; --ink-2:#6E6780; --ink-3:#9B93AB;
+  --line:#E2DBEE;
+  --a:#8FC7AE; --deep:#24452F; --b:#A0BEDA; --pink:#EFA6A6;
+  --alert:#A85440;
+  --shadow:0 1px 2px rgba(86,72,110,.06), 0 8px 22px rgba(86,72,110,.09);
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --paper:#221E2B; --surface:#2E2939; --surface-2:#383144;
+    --ink:#EDE9F2; --ink-2:#B6AEC6; --ink-3:#877E99;
+    --line:#413A52; --deep:#8FC7AE; --alert:#E08A6E;
+    --shadow:0 1px 2px rgba(0,0,0,.32), 0 8px 22px rgba(0,0,0,.26);
+  }
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{
+  margin:0; background:var(--paper); color:var(--ink);
+  font-family:'Assistant',system-ui,sans-serif; font-size:16px; line-height:1.5;
+  padding:24px 18px 60px;
+}
+.wrap{max-width:560px;margin:0 auto}
+button,input{font:inherit;color:inherit}
+button{background:none;border:0;cursor:pointer;padding:0}
+.head{display:flex;align-items:center;gap:14px;margin-bottom:6px}
+.head img{width:52px;height:52px;border-radius:16px;box-shadow:var(--shadow)}
+h1{font-family:'Varela Round',sans-serif;font-weight:400;font-size:25px;margin:0}
+.sub{color:var(--ink-2);font-size:14.5px;margin:0 0 22px}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:22px;
+  padding:18px;box-shadow:var(--shadow);margin-bottom:14px}
+label{display:block;font-size:13px;color:var(--ink-2);margin-bottom:6px}
+input[type=text]{width:100%;background:var(--paper);border:1px solid var(--line);
+  border-radius:14px;padding:12px 14px;outline:none}
+input[type=text]:focus-visible{border-color:var(--b)}
+.btn{background:var(--a);color:var(--deep);border-radius:999px;padding:13px 26px;
+  font-weight:700;display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  transition:transform .12s;width:100%;margin-top:14px}
+.btn:active{transform:scale(.97)}
+.mini{border:1px solid var(--line);border-radius:999px;padding:8px 15px;
+  font-size:14px;font-weight:600;flex:none;background:var(--surface)}
+.mini.danger{color:var(--alert)}
+.card{background:var(--surface-2);border-radius:16px;padding:14px;margin-top:12px}
+.card .nm{font-weight:700;margin-bottom:8px;display:flex;align-items:center;gap:8px}
+.card .nm i{width:9px;height:9px;border-radius:50%;background:var(--pink);flex:none}
+.link{direction:ltr;text-align:left;font-size:12.5px;word-break:break-all;
+  color:var(--ink-2);background:var(--surface);border:1px solid var(--line);
+  border-radius:12px;padding:10px 12px}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.date{font-size:12px;color:var(--ink-3);margin-inline-start:auto;font-weight:400}
+.note{font-size:13px;color:var(--ink-2);background:var(--surface-2);
+  border-inline-start:4px solid var(--pink);border-radius:14px;padding:13px 15px;margin-top:16px}
+.empty{color:var(--ink-3);font-size:14px;text-align:center;padding:18px 0}
+h2{font-size:16px;margin:26px 0 0}
+a{color:var(--b)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="head">
+    <img src="icon/icon-192.png" alt="">
+    <div>
+      <h1>הנפקת קישורים</h1>
+      <div class="sub" style="margin:0">קישור אחד לכל זוג. הדף הזה לשימוש שלך בלבד.</div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <label for="who">למי הקישור? (רק כדי שתזכור)</label>
+    <input id="who" type="text" placeholder="למשל: נעמה ורוני" autocomplete="off">
+    <button class="btn" id="make">יצירת קישור חדש</button>
+  </div>
+
+  <div id="warn" class="note" style="display:none;border-inline-start-color:var(--alert)">
+    <b>הדף הזה לא נפתח מהאתר.</b> הקישורים ייבנו על כתובת ברירת המחדל.
+    כדי להיות בטוח, פתח את הדף מהכתובת
+    <span style="direction:ltr;display:inline-block">idoravid15-art.github.io/mesimot/new.html</span>.
+  </div>
+
+  <h2>קישורים שהנפקת</h2>
+  <div id="list"></div>
+
+  <div class="note">
+    <b>אל תתחבר בעצמך לקישור שיצרת.</b> בכל בית יש שני מקומות בלבד, ומי שמתחבר
+    תופס אחד מהם. אם תיכנס כדי "לבדוק", לא יישאר מקום לאחד מבני הזוג — ותצטרך
+    לצאת דרך הגדרות ← יציאה מהבית הזה.
+  </div>
+
+</div>
+
+<script>
+// when this file is opened from a preview or from disk, location.href is
+// something like about:srcdoc or file:/// — never build a shareable link from that
+const FALLBACK = 'https://idoravid15-art.github.io/mesimot/';
+function appBase(){
+  if(!/^https?:/i.test(location.href)) return FALLBACK;
+  return location.href.replace(/[#?].*$/, '').replace(/new\.html$/, '');
+}
+const APP = appBase();
+const KEY = 'mesimot:issued';
+
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, m =>
+  ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+
+function load(){ try { return JSON.parse(localStorage.getItem(KEY) || '[]'); } catch { return []; } }
+function save(v){ localStorage.setItem(KEY, JSON.stringify(v)); }
+
+function makeId(){
+  const al = 'abcdefghijkmnpqrstuvwxyz23456789';   // no lookalikes
+  const r = new Uint32Array(14);
+  crypto.getRandomValues(r);
+  return 'b' + [...r].map(n => al[n % al.length]).join('');
+}
+function linkFor(rec){
+  const n = rec.label ? '&n=' + encodeURIComponent(rec.label) : '';
+  return APP + '#h=' + rec.id + n;
+}
+function whatsappText(rec){
+  return 'הכנתי לכם רשימת מטלות משותפת 🙂\n\n' + linkFor(rec) +
+    '\n\nכל אחד מכם פותח את הקישור ומתחבר עם גוגל — פעם אחת בלבד.' +
+    '\nאחר כך כדאי להוסיף למסך הבית כדי שזה יהיה כמו אפליקציה רגילה.';
+}
+
+function draw(){
+  const list = $('#list'); list.innerHTML = '';
+  const recs = load();
+  if(!recs.length){
+    list.innerHTML = '<div class="empty">עוד לא יצרת אף קישור.</div>';
+    return;
+  }
+  recs.forEach((rec, idx) => {
+    const url = linkFor(rec);
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML =
+      `<div class="nm"><i></i>${esc(rec.label || 'בלי שם')}` +
+      `<span class="date">${new Date(rec.at).toLocaleDateString('he-IL')}</span></div>` +
+      `<div class="link">${esc(url)}</div>`;
+
+    const row = document.createElement('div'); row.className = 'row';
+
+    const cp = document.createElement('button'); cp.className = 'mini'; cp.textContent = 'העתקה';
+    cp.onclick = async () => {
+      try { await navigator.clipboard.writeText(url); cp.textContent = 'הועתק ✓';
+            setTimeout(() => cp.textContent = 'העתקה', 1600); }
+      catch { prompt('העתיקו את הקישור:', url); }
+    };
+
+    const wa = document.createElement('a'); wa.className = 'mini'; wa.textContent = 'שליחה בוואטסאפ';
+    wa.href = 'https://wa.me/?text=' + encodeURIComponent(whatsappText(rec));
+    wa.target = '_blank'; wa.rel = 'noopener';
+    wa.style.textDecoration = 'none';
+
+    const rm = document.createElement('button'); rm.className = 'mini danger'; rm.textContent = 'הסרה מהרשימה';
+    rm.onclick = () => {
+      if(!confirm('להסיר את הקישור מהרשימה כאן? הרשימה עצמה והנתונים שלה לא נמחקים.')) return;
+      const all = load(); all.splice(idx, 1); save(all); draw();
+    };
+
+    row.append(cp, wa, rm);
+    card.append(row);
+    list.append(card);
+  });
+}
+
+$('#make').onclick = () => {
+  const label = $('#who').value.trim();
+  const all = load();
+  all.unshift({ id: makeId(), label, at: Date.now() });
+  save(all);
+  $('#who').value = '';
+  draw();
+};
+$('#who').onkeydown = e => { if(e.key === 'Enter') $('#make').click(); };
+
+if(!/^https?:/i.test(location.href)) document.getElementById('warn').style.display = '';
+
+draw();
+</script>
+</body>
+</html>
